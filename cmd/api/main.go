@@ -2,13 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"user-activity-tracking-service/internal/config"
 	"user-activity-tracking-service/internal/database"
+	"user-activity-tracking-service/internal/handler"
+	"user-activity-tracking-service/internal/repository"
+	"user-activity-tracking-service/internal/service"
 )
 
 func main() {
@@ -53,12 +60,55 @@ func main() {
 
 	logger.Info("database initialization and healthcheck completed successfully")
 
+	// Initialize layers
+	eventRepo := repository.NewPostgresEventRepository(pool)
+	eventService := service.NewEventService(eventRepo)
+	eventHandler := handler.NewEventHandler(eventService)
+
+	// Router setup
+	mux := http.NewServeMux()
+	eventHandler.RegisterRoutes(mux)
+
+	// Health check endpoint
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	serverAddr := fmt.Sprintf(":%d", cfg.ServerPort)
+	server := &http.Server{
+		Addr:         serverAddr,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Start server in background
+	go func() {
+		logger.Info("HTTP server listening", slog.String("addr", serverAddr))
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("HTTP server failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+	}()
+
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	logger.Info("service scaffolding and database setup ready (press Ctrl+C to stop)")
 	<-sigChan
+	logger.Info("shutting down HTTP server...")
 
-	logger.Info("shutting down user-activity-tracking-service...")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Error("graceful shutdown failed", slog.String("error", err.Error()))
+	} else {
+		logger.Info("HTTP server stopped gracefully")
+	}
+
+	logger.Info("service shutdown complete")
 }
