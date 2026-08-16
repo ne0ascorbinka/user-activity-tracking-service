@@ -17,6 +17,27 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: activity_tracker_api
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    environment:
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-activity_tracker}
+      DB_SSLMODE: disable
+      AGGREGATION_INTERVAL: ${AGGREGATION_INTERVAL:-4h}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
     driver: local
