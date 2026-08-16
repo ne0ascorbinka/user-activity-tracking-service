@@ -12,4 +12,15 @@ type UserActivityStat struct {
 	PeriodStart time.Time `json:"period_start"`
 	PeriodEnd   time.Time `json:"period_end"`
 	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+// ListStatsFilter defines query parameters for filtering aggregate statistics.
+type ListStatsFilter struct {
+	UserID *int64
+	From   *time.Time
+	To     *time.Time
+	Limit  int
+	Offset int
+}
+

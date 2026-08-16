@@ -16,6 +16,7 @@ import (
 	"user-activity-tracking-service/internal/handler"
 	"user-activity-tracking-service/internal/repository"
 	"user-activity-tracking-service/internal/service"
+	"user-activity-tracking-service/internal/worker"
 )
 
 func main() {
@@ -65,9 +66,14 @@ func main() {
 	eventService := service.NewEventService(eventRepo)
 	eventHandler := handler.NewEventHandler(eventService)
 
+	statRepo := repository.NewPostgresStatRepository(pool)
+	statService := service.NewStatService(statRepo)
+	statHandler := handler.NewStatHandler(statService)
+
 	// Router setup
 	mux := http.NewServeMux()
 	eventHandler.RegisterRoutes(mux)
+	statHandler.RegisterRoutes(mux)
 
 	// Health check endpoint
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +81,13 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	// Initialize and start background aggregation worker
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+
+	aggregationWorker := worker.NewAggregationWorker(statService, cfg.AggregationInterval, logger)
+	go aggregationWorker.Start(workerCtx)
 
 	serverAddr := fmt.Sprintf(":%d", cfg.ServerPort)
 	server := &http.Server{
@@ -99,7 +112,10 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	<-sigChan
-	logger.Info("shutting down HTTP server...")
+	logger.Info("shutting down HTTP server and background worker...")
+
+	// Cancel background worker context
+	workerCancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
