@@ -1,121 +1,181 @@
 # User Activity Tracking Service
 
-A lightweight Go REST API service backed by PostgreSQL that ingests user activity events, exposes filtered query endpoints, and runs a background aggregation job every 4 hours. Includes a minimal React web client for viewing events.
+A lightweight, robust Go REST API service backed by PostgreSQL that ingests high-throughput user activity events, provides filtered query endpoints, and executes scheduled background aggregations (every 4 hours). Includes a modern React web dashboard for inspecting events and aggregated metrics in real time.
 
 ---
 
-## Project Structure
+## ⚡ Quickstart (Run Full Stack)
 
+You can launch the entire stack (**PostgreSQL + Go Backend + React Frontend**) with a single command:
+
+```bash
+docker compose up --build
 ```
-user-activity-tracking-service/
-├── cmd/
-│   ├── api/
-│   │   └── main.go                 # Service entrypoint (config, migrations, pool)
-│   └── seed/
-│       └── main.go                 # Database seeder script
-├── internal/
-│   ├── config/
-│   │   ├── config.go               # Configuration loader and PostgreSQL DSN generator
-│   │   └── config_test.go          # Config unit tests
-│   ├── database/
-│   │   ├── database.go             # pgxpool connection & healthcheck logic
-│   │   └── migrate.go              # golang-migrate runner
-│   ├── models/
-│   │   ├── event.go                # Ingested event models
-│   │   └── stat.go                 # Aggregated stats models
-│   ├── repository/                 # Data access layer
-│   ├── service/                    # Business logic layer
-│   ├── handler/                    # HTTP handlers
-│   └── worker/                     # Background aggregation worker
-├── migrations/
-│   ├── 000001_create_events_table.up.sql
-│   ├── 000001_create_events_table.down.sql
-│   ├── 000002_create_user_activity_stats_table.up.sql
-│   ├── 000002_create_user_activity_stats_table.down.sql
-│   ├── migrations.go               # Embeds SQL files into binary
-│   └── migrations_test.go          # Migration embed tests
-├── docs/
-│   └── SPEC.md                     # Project specification
-├── frontend/                       # React + TypeScript + Tailwind client
-│   ├── src/                        # Component hierarchy & state management
-│   ├── Dockerfile                  # Multi-stage Nginx container build
-│   └── vite.config.ts              # Vite config with dev proxy to API
-├── Makefile                    # Make targets (run, seed, seed-local, test, docker-up, etc.)
-├── .env.example                # Sample environment variables
-├── docker-compose.yml          # Multi-container setup (Postgres + API + Frontend)
-├── go.mod                      # Go module definition
-└── README.md
+
+### Accessing the Services
+
+| Service | URL / Port | Description |
+| :--- | :--- | :--- |
+| **Frontend Dashboard** | [http://localhost:3000](http://localhost:3000) | Interactive React UI for filtering events and viewing activity |
+| **REST API** | [http://localhost:8080](http://localhost:8080) | Go HTTP server (`/api/v1/events`, `/health`) |
+| **PostgreSQL** | `localhost:5433` (Host) / `5432` (Internal) | Database (`activity_tracker`) |
+
+> [!TIP]
+> **Populate Demo Data:** Run the following command in another terminal while containers are running to seed realistic mock data and compute sample 4-hour aggregates:
+> ```bash
+> docker compose exec api /app/seed
+> # or using Make:
+> make seed
+> ```
+
+---
+
+## 🏗 Architecture & Features
+
+- **High-Performance Go Backend**: Built with standard library `net/http` routing, structured JSON logging, and connection pooling via `jackc/pgx/v5`.
+- **Database Migrations**: Automatic SQL schema migrations applied on application startup using `golang-migrate`.
+- **Background Worker**: In-process ticker worker computing aggregate activity stats over sliding 4-hour windows (configurable via `AGGREGATION_INTERVAL`).
+- **React Frontend**: Clean, responsive dashboard built with Vite, TypeScript, and Tailwind CSS.
+- **Dockerized**: Production-ready multi-stage Docker builds with health checks and volume persistence.
+
+---
+
+## 📡 API Reference & Examples
+
+### 1. Ingest Activity Event
+
+Record an action performed by a user.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": 42,
+    "action": "page_view",
+    "metadata": {
+      "page": "/dashboard",
+      "ip": "192.168.1.1"
+    }
+  }'
+```
+
+**Response (`201 Created`):**
+```json
+{
+  "id": 1,
+  "user_id": 42,
+  "action": "page_view",
+  "metadata": {
+    "ip": "192.168.1.1",
+    "page": "/dashboard"
+  },
+  "created_at": "2026-08-16T12:00:00Z"
+}
 ```
 
 ---
 
-## Getting Started
+### 2. Retrieve Filtered Events
 
-### 1. Prerequisites
+Query stored events with optional filtering by `user_id`, `from`, and `to` timestamps (ISO 8601 / RFC3339).
+
+```bash
+# Retrieve all events
+curl http://localhost:8080/api/v1/events
+
+# Filter by user_id
+curl "http://localhost:8080/api/v1/events?user_id=42"
+
+# Filter by user_id and date range
+curl "http://localhost:8080/api/v1/events?user_id=42&from=2026-08-01T00:00:00Z&to=2026-08-16T23:59:59Z"
+```
+
+---
+
+### 3. Health Check
+
+```bash
+curl http://localhost:8080/health
+```
+
+**Response (`200 OK`):**
+```json
+{
+  "status": "ok",
+  "database": "connected"
+}
+```
+
+---
+
+## 💻 Local Development Workflow
+
+If you prefer running components locally outside of Docker containers:
+
+### Prerequisites
 - [Go 1.22+](https://golang.org/dl/)
 - [Node.js 20+](https://nodejs.org/)
-- [Docker & Docker Compose](https://www.docker.com/)
+- [Docker](https://www.docker.com/) (for PostgreSQL)
 
-### 2. Environment Configuration
-Copy `.env.example` to `.env`:
+### 1. Configure Environment
 ```bash
 cp .env.example .env
 ```
 
-### 3. Running with Docker Compose
-To build and run all services (PostgreSQL, Go REST API, and Nginx React Frontend):
-```bash
-docker compose up --build
-# or using Make:
-make docker-up
-```
-- **Frontend UI**: `http://localhost:3000`
-- **REST API**: `http://localhost:8080`
-- **PostgreSQL**: `localhost:5433` (host mapping) / `5432` (internal network)
-
-#### Seed Data in Docker
-To populate the running Docker containers with ~100 realistic events and compute historical 4-hour aggregations:
-```bash
-docker compose exec api /app/seed
-# or using Make:
-make seed
-```
-
-### 4. Running Locally for Development
-
-#### A. Start PostgreSQL
+### 2. Start PostgreSQL Database
 ```bash
 docker compose up -d postgres
 ```
 
-#### B. Run the API Service
+### 3. Run Backend API
 ```bash
 go run ./cmd/api/main.go
-# or using Make:
-make run
+# or: make run
 ```
-The service will automatically run pending SQL migrations and establish a PostgreSQL connection pool.
+*Migrations will execute automatically on startup.*
 
-#### C. Run the Frontend Client
+### 4. Run Frontend Client
 ```bash
 cd frontend
 npm install
 npm run dev
-# or from root using Make:
-make frontend
+# or from project root: make frontend
 ```
-Open `http://localhost:5173` in your browser. API calls to `/api` and `/health` will be automatically proxied to `http://localhost:8080`.
+*Frontend dev server starts at `http://localhost:5173` with automatic proxying to `http://localhost:8080`.*
 
-#### D. Seed Realistic Mock Data Locally (Optional)
+### 5. Seed Local Database (Optional)
 ```bash
 go run ./cmd/seed/main.go
-# or using Make:
-make seed-local
+# or: make seed-local
 ```
 
-### 5. Running Tests
+### 6. Run Tests
 ```bash
 go test -v ./...
-# or using Make:
-make test
+# or: make test
+```
+
+---
+
+## 📂 Project Structure
+
+```
+user-activity-tracking-service/
+├── cmd/
+│   ├── api/main.go                 # Service entrypoint (config, migrations, pool)
+│   └── seed/main.go                # Database seeder script
+├── internal/
+│   ├── config/                     # Configuration loader & PostgreSQL DSN builder
+│   ├── database/                   # pgxpool connection & migration runner
+│   ├── handler/                    # HTTP endpoints & request validators
+│   ├── models/                     # Event & Stat domain models
+│   ├── repository/                 # PostgreSQL query layer
+│   ├── service/                    # Business logic layer
+│   └── worker/                     # 4-hour periodic aggregation worker
+├── migrations/                     # Embedded SQL migration files
+├── docs/                           # Project specifications & documentation
+├── frontend/                       # Vite + React + TypeScript web dashboard
+├── docker-compose.yml              # PostgreSQL, API, and Frontend orchestration
+├── Makefile                        # Shortcuts for development commands
+└── README.md
 ```
