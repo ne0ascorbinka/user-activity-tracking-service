@@ -18,6 +18,8 @@ docker compose up --build
 | :--- | :--- | :--- |
 | **Frontend Dashboard** | [http://localhost:3000](http://localhost:3000) | Interactive React UI for filtering events and viewing activity |
 | **REST API** | [http://localhost:8080](http://localhost:8080) | Go HTTP server (`/api/v1/events`, `/health`) |
+| **Grafana** | [http://localhost:3001](http://localhost:3001) | Observability UI & log explorer (admin / admin) |
+| **Loki** | `http://localhost:3100` | Log aggregation engine |
 | **PostgreSQL** | `localhost:5433` (Host) / `5432` (Internal) | Database (`activity_tracker`) |
 
 > [!TIP]
@@ -27,6 +29,30 @@ docker compose up --build
 > # or using Make:
 > make seed
 > ```
+
+---
+
+## 📊 Observability & Log Monitoring (Grafana + Loki + Promtail)
+
+Container logs across the stack are automatically collected via Promtail, forwarded into Loki, and visualized in Grafana.
+
+1. Open **Grafana** in your browser at [http://localhost:3001](http://localhost:3001).
+2. Log in with the default credentials:
+   - **Username**: `admin`
+   - **Password**: `admin`
+3. Navigate to **Explore** in the left sidebar (or press `g` then `e`).
+4. Ensure the **Loki** data source is selected in the dropdown.
+5. In the query editor, enter one of the following LogQL expressions to stream logs in real time:
+   ```logql
+   # View all logs from the Go REST API container:
+   {container_name="activity_tracker_api"}
+
+   # Or using the app label:
+   {app="api"}
+
+   # Filter specifically for errors or worker executions:
+   {app="api"} |= "aggregation"
+   ```
 
 ---
 
